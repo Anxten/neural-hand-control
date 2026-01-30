@@ -39,13 +39,32 @@ git clone https://github.com/Anxten/neural-hand-control.git
 cd neural-hand-control
 ```
 
-### 2. Create Directories
+### 2. Create Virtual Environment (Recommended)
+It is highly recommended to use a virtual environment to avoid conflicts.
+
+```bash
+# Create venv
+python -m venv venv
+
+# Activate venv (Linux/MacOS)
+source venv/bin/activate
+
+# Activate venv (Windows)
+# venv\Scripts\activate
+```
+
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Create Data Directories
 ```bash
 mkdir -p data/raw/{rock,paper,scissors,none}
 mkdir models
 ```
 
-### 3. Collect Training Data
+### 5. Collect Training Data
 ```bash
 python collect_data.py
 ```
@@ -55,12 +74,12 @@ python collect_data.py
 - Press `n` for NONE (empty hand)
 - Collect ~500 samples per gesture
 
-### 4. Train the Model
+### 6. Train the Model
 ```bash
 python train.py
 ```
 
-### 5. Run Hand Control
+### 7. Run Hand Control
 ```bash
 python main.py
 ```
