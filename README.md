@@ -35,7 +35,7 @@ pip install torch torchvision opencv-python numpy
 
 ### 1. Clone Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/Anxten/neural-hand-control.git
 cd neural-hand-control
 ```
 
