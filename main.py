@@ -3,40 +3,28 @@ import torch.nn as nn
 from torchvision import transforms
 import cv2
 import numpy as np
+import time
+import subprocess
 
 # --- 1. KONFIGURASI ---
 MODEL_PATH = "models/hand_gesture_cnn.pth"
-CLASSES = ['none', 'paper', 'rock', 'scissors'] # Urutan harus sesuai alfabet folder tadi!
+CLASSES = ['none', 'paper', 'rock', 'scissors']
 BOX_SIZE = 250
 IMG_SIZE = 64
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- 2. DEFINISI ULANG MODEL (Wajib sama persis dengan train.py) ---
+# --- 2. DEFINISI MODEL ---
 class HandGestureCNN(nn.Module):
     def __init__(self):
         super(HandGestureCNN, self).__init__()
-        
-        # Layer 1
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
         self.relu = nn.ReLU()
         self.pool = nn.MaxPool2d(2, 2)
-        
-        # Layer 2
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        
-        # Layer 3
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        
-        # Flatten
         self.flatten = nn.Flatten()
-        
-        # Fully Connected + DROPOUT
         self.fc1 = nn.Linear(128 * 8 * 8, 128)
-        
-        # DROPOUT: Membuang 50% informasi neuron secara acak.
-        # Efek: Mencegah AI "menghafal" posisi tertentu. Dia harus paham bentuk global.
         self.dropout = nn.Dropout(0.5) 
-        
         self.fc2 = nn.Linear(128, 4)
 
     def forward(self, x):
@@ -45,92 +33,106 @@ class HandGestureCNN(nn.Module):
         x = self.pool(self.relu(self.conv3(x)))
         x = self.flatten(x)
         x = self.relu(self.fc1(x))
-        x = self.dropout(x) # Terapkan dropout sebelum layer terakhir
+        x = self.dropout(x)
         x = self.fc2(x)
         return x
 
-# --- 3. LOAD OTAK AI ---
+# --- 3. LOAD MODEL ---
 print("🧠 Memuat model AI...")
 model = HandGestureCNN().to(DEVICE)
 try:
-    # Load weight ke CPU agar aman (map_location)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-    model.eval() # Mode evaluasi (matikan dropout/batchnorm training)
+    model.eval()
     print("✅ Model berhasil dimuat!")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
     exit()
 
-# Transformasi gambar (Sama persis dengan training)
 transform = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
     transforms.ToTensor(),
 ])
 
-# --- 4. MULAI KAMERA ---
+# --- 4. SIAPKAN VARIABLE KONTROL ---
+last_action_time = 0
 cap = cv2.VideoCapture(0)
 
-print("📷 Kamera siap! Tekan 'q' untuk keluar.")
+print("📷 Kamera siap! Wayland Mode ON.")
+
+def run_command(cmd_list):
+    try:
+        subprocess.Popen(cmd_list)
+        return True
+    except Exception as e:
+        print(f"Gagal eksekusi: {e}")
+        return False
 
 while True:
     ret, frame = cap.read()
     if not ret: break
     
-    frame = cv2.flip(frame, 1) # Cermin
+    frame = cv2.flip(frame, 1)
     
-    # Ambil ROI (Kotak Hijau)
     h, w, c = frame.shape
     x1, y1 = int(w/2) - 150, 100
     x2, y2 = x1 + BOX_SIZE, y1 + BOX_SIZE
-    
-    # Potong gambar kotak hijau
     roi = frame[y1:y2, x1:x2]
     
-    # --- PREDIKSI AI ---
-    # 1. Ubah warna BGR (OpenCV) ke RGB (PyTorch)
+    # Prediksi AI
     roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+    roi_tensor = transform(roi_rgb).unsqueeze(0).to(DEVICE)
     
-    # 2. Transformasi jadi Tensor
-    roi_tensor = transform(roi_rgb).unsqueeze(0).to(DEVICE) # Tambah dimensi batch [1, 3, 64, 64]
-    
-    # 3. Prediksi
-    with torch.no_grad(): # Gak perlu hitung gradien (hemat memori)
+    with torch.no_grad():
         outputs = model(roi_tensor)
-        
-        # Hitung Probabilitas (Softmax)
         probs = torch.nn.functional.softmax(outputs, dim=1)
-        
-        # Ambil nilai tertinggi (Argmax)
         confidence, predicted = torch.max(probs, 1)
         
         class_name = CLASSES[predicted.item()]
-        conf_score = confidence.item() * 100 # Persentase
+        conf_score = confidence.item() * 100
+
+    # --- LOGIKA KONTROL (TUNED V3) ---
+    current_time = time.time()
+    
+    if class_name == 'paper':
+        needed_cooldown = 1.0
+    else:
+        needed_cooldown = 2.0
+    
+    if conf_score > 90 and (current_time - last_action_time > needed_cooldown):
+        
+        if class_name == 'rock':
+            print("✊ ROCK -> Toggle Media")
+            run_command(["playerctl", "play-pause"])
+            last_action_time = current_time 
+            
+        elif class_name == 'paper':
+            print("✋ PAPER -> Volume +2%")
+            run_command(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+2%"])
+            last_action_time = current_time 
+
+        elif class_name == 'scissors':
+            print("✌️ SCISSORS -> Mute/Unmute Sound")
+            run_command(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"])
+            last_action_time = current_time
 
     # --- VISUALISASI ---
-    # Gambar Kotak
-    color = (0, 255, 0) # Hijau
-    
-    # Kalau AI yakin > 80%, tulis nama jurusnya
-    label_text = f"{class_name.upper()} ({conf_score:.1f}%)"
-    
-    # Tampilkan teks
+    color = (0, 255, 0) if conf_score > 90 else (0, 0, 255)
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-    cv2.putText(frame, "Letakkan tangan di sini", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     
-    # Tampilkan Hasil Prediksi Besar-Besar
-    cv2.putText(frame, label_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
+    text = f"{class_name.upper()} {conf_score:.1f}%"
+    cv2.putText(frame, text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
     
-    # Tampilkan Bar Probabilitas (Opsional - biar keren)
-    y_offset = 100
-    for i, cls in enumerate(CLASSES):
-        p = probs[0][i].item()
-        text = f"{cls}: {p*100:.1f}%"
-        cv2.putText(frame, text, (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-        cv2.rectangle(frame, (120, y_offset-10), (120 + int(p*200), y_offset+5), (0, 255, 0), -1)
-        y_offset += 30
+    time_passed = current_time - last_action_time
+    if time_passed < needed_cooldown:
+        ratio = time_passed / needed_cooldown
+        bar_width = int(ratio * 200)
+        cv2.rectangle(frame, (20, 80), (20 + bar_width, 90), (0, 0, 255), -1)
+        cv2.putText(frame, "WAIT...", (230, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    else:
+        cv2.putText(frame, "READY!", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-    cv2.imshow("Hand Gesture Recognition - Anxten", frame)
+    cv2.imshow("Neural Hand Control (Wayland Safe)", frame)
     
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
